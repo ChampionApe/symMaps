@@ -1,5 +1,6 @@
 import itertools, numpy as np, pandas as pd
 from collections.abc import Iterable
+from six import string_types
 from pyDbs import adj, adjMultiIndex, Broadcast, Gpy, Gpy_, GpySet, GpyVariable, GpyScalar, GpyDict, SimpleDB
 from pyDbs import cartesianProductIndex as CPI
 _numtypes = (int,float,np.generic)

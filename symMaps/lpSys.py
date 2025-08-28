@@ -175,6 +175,10 @@ class LPSys:
 	def scalarDualUpper(self, sol):
 		return np.where(self.out['bounds'][:,0]==self.out['bounds'][:,1], np.add(sol['lower']['marginals'], sol['upper']['marginals']), sol['upper']['marginals'])
 
+
+
+
+	### Compile
 	def compile(self, **kwargs):
 		self.compileMaps()
 		self.compileParams()
@@ -428,7 +432,9 @@ class LPSys:
 
 	# NOTE: Sparse vectors are not yet implemented in scipy optimize 1.16 - only matrices A_eq, A_ub from above. 
 	def dense_bounds(self):
-		bounds = np.full((self.len['v'], 2), np.nan)
+		bounds = np.empty((self.len['v'],2))
+		bounds[:,0] = 0
+		bounds[:,1] = np.nan
 		if len(self.lp['l'])>0:
 			bounds[self._rowsStack('l','v'), 0] = self._dataStack('l')
 		if len(self.lp['u'])>0:
