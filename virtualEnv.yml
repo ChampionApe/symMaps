@@ -1,0 +1,13 @@
+name: symMaps
+channels:
+  - defaults
+dependencies:
+  - python >= 3.12
+  - pip
+  - nodejs
+  - jupyterlab = 4
+  - pandas = 2.3
+  - scipy = 1.16
+  - openpyxl
+  - pip:
+    - pyDbs >= 0.1.5
