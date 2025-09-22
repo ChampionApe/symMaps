@@ -15,7 +15,6 @@ def loopUnpackToDF_k(solsLoop, k, soli, idxLoop = None):
 	else:
 		return pd.Series([solsLoop[l][k] for l in solsLoop], index = idxLoop)
 
-
 # To do: Loop through and change grid values in already compiled models.
 class ModelShell:
 	def __init__(self, db = None, sys = None, scalarDual = True, computeDual = True, solOptions = None, **kwargs):

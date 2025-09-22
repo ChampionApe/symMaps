@@ -5,7 +5,7 @@ with open("README.md", "r") as file:
 
 setuptools.setup(
   name="symMaps",
-  version="0.0.2",
+  version="0.0.4",
   author="Rasmus K. Skjødt Berg",
   author_email="rasmus.kehlet.berg@econ.ku.dk",
   description="System of mappings to navigate stacked system of equations defined over pandas indices",

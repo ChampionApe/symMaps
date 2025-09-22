@@ -1,6 +1,7 @@
 from symMaps.base import *
 from scipy import sparse
 _adjF = adj.rc_pd
+_attr2maps = {'c': 'v','l': 'v', 'u': 'v', 'b_eq': 'eq', 'b_ub': 'ub'} # Navigate from self.lp[attr] to self.maps[maps] 
 
 class AMatrix:
 	""" Defines matrices in long-form. """
@@ -18,6 +19,31 @@ class AMatrix:
 	@property
 	def isscalar(self):
 		return all((x is None for x in (self.vIdx, self.constrIdx)))
+
+	@property
+	def to_frame(self):
+		""" Returns dataframe with index = constraint index, variable index mapped to columns and values in column __values__ """
+		if self.isscalar:
+			print(f"Scalar AMatrix instances does not have a dataframe representation. Returning None")
+			return None
+		elif self.vIdx is None:
+			return pd.DataFrame({'__values__': self.values}, index = self.values)
+		else:
+			return self.vIdx.to_frame(index = False).set_index(self.constrIdx).assign(__values__ = self.values)
+
+	@property
+	def validate(self):
+		if self.isscalar and not isinstance(self.values, _numtypes):
+			raise ValueError(f"AMatrix {self.name} is specified as scalar, but self.values is not a valid scalar type.")
+		elif self.vIdx is None:
+			if len(self.values) != len(self.constrIdx):
+				raise ValueError(f"AMatrix {self.name} has inconsistent length of self.values and self.constrIdx (should be equal).")
+		elif self.constrIdx is None:
+			if len(self.values) != len(self.vIdx):
+				raise ValueError(f"AMatrix {self.name} has inconsistent length of self.values and self.vIdx (should be equal).")
+		elif not (len(self.values) == len(self.vIdx) == len(self.constrIdx)):
+			raise ValueError(f"""AMatrix {self.name} has inconsistent lengths of values and indices (should all be equal).
+	len(values):{len(self.values)}, len(vIdx): {len(self.vIdx)}, len(constrIdx): {len(self.constrIdx)}.""")
 
 class AMDict:
 	def __init__(self, symbols = None):
@@ -111,7 +137,6 @@ class LPSys:
 		self.v = noneInit(v, {}) # used for establishing global domains for variables.
 		self.eq = noneInit(eq, {}) # used for domains eq. constraints.
 		self.ub = noneInit(ub, {}) # used for domains ineq. constraints.
-		# self.lp = {k: GpyDict() for k in ('c','b_eq','b_ub','l','u')} | {k: GpyConstrDict() for k in ('A_ub', 'A_eq')} # collect dense parameters here.
 		self.lp = {k: GpyDict() for k in ('c','b_eq','b_ub','l','u')} | {k: AMDict() for k in ('A_ub', 'A_eq')} # collect dense parameters here.
 		self.out = {k: None for k in ('c','A_ub', 'b_ub', 'A_eq','b_eq','bounds')} # store final objects here.
 		self.len = dict.fromkeys(('v','eq','ub'))
@@ -174,8 +199,6 @@ class LPSys:
 
 	def scalarDualUpper(self, sol):
 		return np.where(self.out['bounds'][:,0]==self.out['bounds'][:,1], np.add(sol['lower']['marginals'], sol['upper']['marginals']), sol['upper']['marginals'])
-
-
 
 
 	### Compile
@@ -325,12 +348,13 @@ class LPSys:
 
 
 	# Methods to initialize vectors c, b_eq, b_ub, l, u:
-	def lazyV(self, name, series = None, v = None, attr = None, how = 'inner'):
-		""" series: pd.Series or scalar. Domains has to be consistent with variable domains. attr ∈ {'v','l','u'}"""
-		if self.v[v] is None:
-			self.lp[attr][(name, v)] = series # scalar index
+	def lazyV(self, name, series = None, symbol = None, attr = None, how = 'inner'):
+		""" series: pd.Series or scalar. Domains has to be consistent with symbol domains. attr ∈ {'c','l','u','b_eq','b_ub'}"""
+		declaredDomain = getattr(self, _attr2maps[attr])[symbol] # get declared domains in self.v, self.eq, or self.ub
+		if declaredDomain is None:
+			self.lp[attr][(name, symbol)] = series # scalar index
 		else:
-			self.lp[attr][(name, v)] = Broadcast.valuesToIdx(series, self.v[v], how = how)
+			self.lp[attr][(name, symbol)] = Broadcast.valuesToIdx(series, declaredDomain, how = how)
 
 	def lazyC(self, name, **kwargs):
 		self.lazyV(name, attr = 'c', **kwargs)
@@ -338,14 +362,67 @@ class LPSys:
 		self.lazyV(name, attr = 'l', **kwargs)
 	def lazyU(self, name, **kwargs):
 		self.lazyV(name, attr = 'u', **kwargs)
+	def lazyBeq(self, name, **kwargs):
+		self.lazyV(name, attr = 'b_eq', **kwargs)
+	def lazyBub(self, name, **kwargs):
+		self.lazyV(name, attr = 'b_ub', **kwargs)
 
-	def lazyB(self, name, series = None, constr = None, attr = None, how = 'inner'):
-		""" series: pd.Series or scalar. Domains has to be consistent with constraint domains. """
-		if getattr(self, attr)[constr] is None:
-			self.lp[f'b_{attr}'][(name, constr)] = series # scalar index
+	def validateAll(self):
+		self.validateAllV()
+		self.validateAllA()
+
+	def validateAllV(self):
+		[self.validateV(name, attr) for attr in ('c','l','u','b_eq','b_ub') for name in self.lp[attr].symbols];
+
+	def validateAllVAttr(self, attr):
+		""" Iterate through components in self.lp[attr] """
+		[self.validateV(name, attr) for name in self.lp[attr].symbols];
+	def validateV(self, name, attr):
+		""" 
+		Check that component 'name' in self.lp[attr] is consistent with declared domains; 
+		raises error if it is not consistent, otherwise does nothing.
+		"""
+		gpyInst = self.lp[attr][name]
+		declaredDomain = getattr(self, _attr2maps[attr])[gpyInst.name]
+		if gpyInst.type == 'scalar':
+			if not declaredDomain is None:
+				raise ValueError(f"self.lp['{attr}']['{name}'] is defined as a scalar on variable '{gpyInst.name}', but the variable is not declared as a scalar in self.{_attr2maps[attr]}")
 		else:
-			self.lp[f'b_{attr}'][(name, constr)] = Broadcast.valuesToIdx(series, getattr(self, attr)[constr], how = how)
+			if not all(gpyInst.index.isin(declaredDomain)):
+				raise ValueError(f"self.lp['{attr}']['{name}'] is defined over an index inconsistent with that declared in self.{_attr2maps[attr]}")
 
+	def validateAllA(self):
+		[self.validateA(name, attr) for attr in ('eq','ub') for name in self.lp[f'A_{attr}'].symbols];
+
+	def validateAllAAttr(self, attr):
+		[self.validateA(name, attr) for name in self.lp[f'A_{attr}'].symbols];
+
+	def validateA(self, name, attr):
+		"""
+		Check that component 'name' in self.lp[f'A_{attr}'] is consistent with declared domains;
+		raises error if it is not consistent, otherwise does nothing.
+		"""
+		AMinst = self.lp[f'A_{attr}'][name]
+		domV, domC = self.v[AMinst.v], getattr(self, attr)[AMinst.constr]
+		AMinst.validate # check internal validity
+		# Check variable index:
+		if domV is None:
+			if AMinst.vIdx is not None:
+				raise ValueError(f"self.lp[A_{attr}]['{name}'] refers to variable {AMinst.v}; this is a scalar, but AMatrix.vIdx is not None (scalar index)")
+		elif AMinst.vIdx is None:
+			if domV is not None:
+				raise ValueError(f"self.lp[A_{attr}]['{name}'] refers to variable {AMinst.v}; this is not a scalar, but AMatrix.vIdx is None (scalar index)")
+		elif not all(AMinst.vIdx.isin(domV)):
+			raise ValueError(f"self.lp[A_{attr}]['{name}'] refers to variable {AMinst.v}. The AMatrix.vIdx contains elements that are not in declared domains in self.v['{AMinst.v}']")
+		# Check constraint index:
+		if domC is None:
+			if AMinst.constrIdx is not None: 
+				raise ValueError(f"self.lp[A_{attr}]['{name}'] refers to constraint {AMinst.constr}; this is a scalar, but AMatrix.constrIdx is not None (scalar index)")
+		elif AMinst.constrIdx is None:
+			if domC is not None:
+				raise ValueError(f"self.lp[A_{attr}]['{name}'] refers to constraint {AMinst.constr}; this is not a scalar, but AMatrix.constrIdx is None (scalar index)")
+		elif not all(AMinst.constrIdx.isin(domC)):
+			raise ValueError(f"self.lp[A_{attr}]['{name}'] refers to constraint {AMinst.constr}. The AMatrix.constrIdx contains elements that are not in declared domains in self.{attr}['{AMinst.constr}']")
 
 	def initA_lag(self, name, series = None, v = None, constr = None, attr = None, lag = None, level = None, fkeep = False, bfill = False, **kwargs):
 		"""

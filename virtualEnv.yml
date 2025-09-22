@@ -10,4 +10,4 @@ dependencies:
   - scipy = 1.16
   - openpyxl
   - pip:
-    - pyDbs >= 0.1.5
+    - pyDbs >= 0.1.8
