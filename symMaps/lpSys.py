@@ -1,7 +1,7 @@
 from symMaps.base import *
 from scipy import sparse
 _adjF = adj.rc_pd
-_attr2maps = {'c': 'v','l': 'v', 'u': 'v', 'b_eq': 'eq', 'b_ub': 'ub'} # Navigate from self.lp[attr] to self.maps[maps] 
+_attr2maps = {'c': 'v', 'l': 'v', 'u': 'v', 'b_eq': 'eq', 'b_ub': 'ub'} # Navigate from self.lp[attr] to self.maps[maps] 
 
 class AMatrix:
 	""" Defines matrices in long-form. """
@@ -354,7 +354,8 @@ class LPSys:
 		if declaredDomain is None:
 			self.lp[attr][(name, symbol)] = series # scalar index
 		else:
-			self.lp[attr][(name, symbol)] = Broadcast.valuesToIdx(series, declaredDomain, how = how)
+			series = Broadcast.valuesToIdx(series, declaredDomain, how = how)
+			self.lp[attr][(name, symbol)] = series.reorder_levels(declaredDomain.names) if isinstance(series.index, pd.MultiIndex) else series
 
 	def lazyC(self, name, **kwargs):
 		self.lazyV(name, attr = 'c', **kwargs)
@@ -472,7 +473,7 @@ class LPSys:
 		lSeries = Roll.series(vSeries, roll) # roll series mapped to variable index.
 		fIdx = Broadcast.idx(constrIdx, lSeries.index) # broadcast full index.
 		flSeries = Broadcast.valuesToIdx(lSeries, fIdx) # full lagged series.
-		self._addRolledA(name, flSeries, v = v, constr = constr, attr= attr, lag = lag)
+		self._addRolledA(name, flSeries, v = v, constr = constr, attr= attr, roll = roll)
 
 	def lazyA(self, name, series = None, v = None, constr = None, attr = None, constrIdx = None, vIdx = None, **kwargs):
 		""" 
